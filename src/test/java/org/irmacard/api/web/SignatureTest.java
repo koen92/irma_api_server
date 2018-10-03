@@ -39,10 +39,7 @@ import org.glassfish.jersey.client.ClientConfig;
 import org.glassfish.jersey.test.JerseyTest;
 import org.glassfish.jersey.test.TestProperties;
 import org.glassfish.jersey.test.jetty.JettyTestContainerFactory;
-import org.irmacard.api.common.AttributeDisjunction;
-import org.irmacard.api.common.AttributeDisjunctionList;
-import org.irmacard.api.common.ClientQr;
-import org.irmacard.api.common.IrmaSignedMessage;
+import org.irmacard.api.common.*;
 import org.irmacard.api.common.disclosure.DisclosureProofResult.Status;
 import org.irmacard.api.common.signatures.SignatureClientRequest;
 import org.irmacard.api.common.signatures.SignatureProofRequest;
@@ -106,14 +103,14 @@ public class SignatureTest extends JerseyTest {
 		return new ApiApplication();
 	}
 
-	private String createSession(String value) throws InfoException {
+	private String createSession(String value, String messageType) throws InfoException {
 		AttributeDisjunction d = new AttributeDisjunction("Over 12", schemeManager + ".MijnOverheid.ageLower.over12");
 		if (value != null)
 			d.getValues().put(d.get(0), value);
 
 		AttributeDisjunctionList attrs = new AttributeDisjunctionList(1);
 		attrs.add(d);
-		SignatureProofRequest request = new SignatureProofRequest(BigInteger.ONE, BigInteger.ONE, attrs, "to be signed");
+		SignatureProofRequest request = new SignatureProofRequest(BigInteger.ONE, BigInteger.ONE, attrs, "to be signed", IrmaSignatureType.fromString(messageType));
 		SignatureClientRequest spRequest = new SignatureClientRequest("testrequest", request, 60);
 
 		Map<String, Object> claims = new HashMap<>();
@@ -153,7 +150,7 @@ public class SignatureTest extends JerseyTest {
 		ProofList proofs = new ProofListBuilder(request.getContext(), request.getNonce(), isSig)
 				.addProofD(cred, disclosed)
 				.build();
-		IrmaSignedMessage irmaSignedMessage = new IrmaSignedMessage(proofs, request.getSignatureNonce(), request.getContext(), request.getMessage(), null);
+		IrmaSignedMessage irmaSignedMessage = new IrmaSignedMessage(proofs, request.getSignatureNonce(), request.getContext(), request.getMessage(), request.getMessageType(), null);
 		Status status = target("/signature/" + session + "/proofs").request(MediaType.APPLICATION_JSON)
 				.post(Entity.entity(irmaSignedMessage, MediaType.APPLICATION_JSON), Status.class);
 
@@ -186,9 +183,10 @@ public class SignatureTest extends JerseyTest {
 			BigInteger nonce = signature.getNonce();
 			BigInteger context = signature.getContext();
 			String message = signature.getMessage();
+			IrmaSignatureType messageType = signature.getMessageType();
 
 			SignatureProofRequest resultReq = new SignatureProofRequest(nonce, context,
-					new AttributeDisjunctionList(), message);
+					new AttributeDisjunctionList(), message, messageType);
 			result = resultReq.verify(proofs, false);
 			assert result.getStatus().equals(Status.VALID);
 		}
@@ -197,21 +195,28 @@ public class SignatureTest extends JerseyTest {
 	@Test
 	public void validSessionTest() throws InfoException, KeyException, KeyManagementException {
 		IdemixCredential cred = VerificationTest.getAgeLowerCredential();
-		String session = createSession(null);
+		String session = createSession(null, null);
+		doSession(cred, Arrays.asList(1, 2), session, Status.VALID, Status.VALID, true);
+	}
+
+	@Test
+	public void validSessionWithTypeTest() throws InfoException, KeyException, KeyManagementException {
+		IdemixCredential cred = VerificationTest.getAgeLowerCredential();
+		String session = createSession(null, "jpg");
 		doSession(cred, Arrays.asList(1, 2), session, Status.VALID, Status.VALID, true);
 	}
 
 	@Test
 	public void verifySigAsDisclosureProofTest() throws InfoException, KeyException, KeyManagementException {
 		IdemixCredential cred = VerificationTest.getAgeLowerCredential();
-		String session = createSession(null);
+		String session = createSession(null, null);
 		doSession(cred, Arrays.asList(1, 2), session, Status.INVALID, Status.INVALID, false);
 	}
 
 	@Test
 	public void validSessionWithConditionTest() throws InfoException, KeyException, KeyManagementException {
 		IdemixCredential cred = VerificationTest.getAgeLowerCredential();
-		String session = createSession("yes");
+		String session = createSession("yes",null);
 		doSession(cred, Arrays.asList(1, 2), session, Status.VALID, Status.VALID, true);
 	}
 
@@ -221,7 +226,7 @@ public class SignatureTest extends JerseyTest {
 	@Test
 	public void validSessionWithInvalidConditionTest() throws InfoException, KeyException, KeyManagementException {
 		IdemixCredential cred = VerificationTest.getAgeLowerCredential();
-		String session = createSession("this is an invalid condition");
+		String session = createSession("this is an invalid condition", null);
 		doSession(cred, Arrays.asList(1, 2), session, Status.MISSING_ATTRIBUTES, Status.VALID, true);
 	}
 
@@ -282,12 +287,12 @@ public class SignatureTest extends JerseyTest {
 		final String message = "foo";
 
 		SignatureProofRequest request = new SignatureProofRequest(
-				nonce, context, null, message);
+				nonce, context, null, message, null);
 		ProofList proofs = new ProofListBuilder(context, request.getNonce(), true)
 				.addProofD(issue(exp.getTime()), Arrays.asList(1, 2))
 				.build();
 
-		IrmaSignedMessage signature = new IrmaSignedMessage(proofs, nonce, context, message, null);
+		IrmaSignedMessage signature = new IrmaSignedMessage(proofs, nonce, context, message, null, null);
 
 		if (verificationDate == null) {
 			String jwt = target("/signature/checksignature")
